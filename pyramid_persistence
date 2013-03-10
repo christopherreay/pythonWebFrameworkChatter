@@ -2,16 +2,38 @@ from persistent.mapping import PersistentMapping
 
 
 class MyModel(PersistentMapping):
+    #These two fields are used by the Pyramid engine to create a tree hierarchy.
+    #That tree automatically provides navigation to the objects on the object tree.
+    #Thats not the only way to create navigation in Pyramid.
+    #The tree also provides a substrate for event propogation
     __parent__ = __name__ = None
 
+
+#Usually "Views" and "Models" are separate, but I will just dump it all here for visibility sake.
+#Somewhere in the configuration (declarative or otherwise), some route (e.g. config.add_route("myroute", someURLParams))
+#will have defined what route_name='myroute' resolves to
+
+from pyramid.view import view_config
+from pyramid.response import Response
 class OtherModel(MyModel):
-  pass    
+    @view_config(route_name='myroute')
+    def webFunction(request):
+        return Response("OK")
 
 def appmaker(zodb_root):
     if not 'app_root' in zodb_root:
         app_root = MyModel()
         zodb_root['app_root'] = app_root
-        app_root['otherModel'] = OtherModel()
+        
+        #otherModel can thus be reached by two different urls. One from the view_config route (assuming OtherModel
+        #  is a singleton
+        #the other from its location in the object tree, via traversal
+        #  i.e /otherModel
+        otherModel = OtherModel()
+        otherModel.__parent__ = app_root
+        otherModel.__name__   = "aLeafOrWhatever"
+        app_root['otherModel'] = otherModel
+        
         import transaction
         transaction.commit()
     return zodb_root['app_root']

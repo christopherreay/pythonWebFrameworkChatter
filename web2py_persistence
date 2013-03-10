@@ -1,0 +1,126 @@
+def select():
+    import re
+    db = get_database(request)
+    dbname = request.args[0]
+    regex = re.compile('(?P<table>\w+)\.(?P<field>\w+)=(?P<value>\d+)')
+    if len(request.args)>1 and hasattr(db[request.args[1]],'_primarykey'):
+        regex = re.compile('(?P<table>\w+)\.(?P<field>\w+)=(?P<value>.+)')
+    if request.vars.query:
+        match = regex.match(request.vars.query)
+        if match:
+            request.vars.query = '%s.%s.%s==%s' % (request.args[0],
+                    match.group('table'), match.group('field'),
+                    match.group('value'))
+    else:
+        request.vars.query = session.last_query
+    query = get_query(request)
+    if request.vars.start:
+        start = int(request.vars.start)
+    else:
+        start = 0
+    nrows = 0
+    stop = start + 100
+    table = None
+    rows = []
+    orderby = request.vars.orderby
+    if orderby:
+        orderby = dbname + '.' + orderby
+        if orderby == session.last_orderby:
+            if orderby[0] == '~':
+                orderby = orderby[1:]
+            else:
+                orderby = '~' + orderby
+    session.last_orderby = orderby
+    session.last_query = request.vars.query
+    form = FORM(TABLE(TR(T('Query:'), '', INPUT(_style='width:400px',
+                _name='query', _value=request.vars.query or '',
+                requires=IS_NOT_EMPTY(error_message=T("Cannot be empty")))), TR(T('Update:'),
+                INPUT(_name='update_check', _type='checkbox',
+                value=False), INPUT(_style='width:400px',
+                _name='update_fields', _value=request.vars.update_fields
+                 or '')), TR(T('Delete:'), INPUT(_name='delete_check',
+                _class='delete', _type='checkbox', value=False), ''),
+                TR('', '', INPUT(_type='submit', _value='submit'))),
+                _action=URL(r=request,args=request.args))
+    if request.vars.csvfile != None:
+        try:
+            import_csv(db[request.vars.table],
+                       request.vars.csvfile.file)
+            response.flash = T('data uploaded')
+        except Exception, e:
+            response.flash = DIV(T('unable to parse csv file'),PRE(str(e)))
+    if form.accepts(request.vars, formname=None):
+#         regex = re.compile(request.args[0] + '\.(?P<table>\w+)\.id\>0')
+        regex = re.compile(request.args[0] + '\.(?P<table>\w+)\..+')
+        
+        match = regex.match(form.vars.query.strip())
+        if match:
+            table = match.group('table')
+        try:
+            nrows = db(query).count()
+            if form.vars.update_check and form.vars.update_fields:
+                db(query).update(**eval_in_global_env('dict(%s)'
+                                  % form.vars.update_fields))
+                response.flash = T('%s rows updated', nrows)
+            elif form.vars.delete_check:
+                db(query).delete()
+                response.flash = T('%s rows deleted', nrows)
+            nrows = db(query).count()
+            if orderby:
+                rows = db(query).select(limitby=(start, stop),
+                        orderby=eval_in_global_env(orderby))
+            else:
+                rows = db(query).select(limitby=(start, stop))
+        except Exception, e:
+            (rows, nrows) = ([], 0)
+            response.flash = DIV(T('Invalid Query'),PRE(str(e)))
+    return dict(
+        form=form,
+        table=table,
+        start=start,
+        stop=stop,
+        nrows=nrows,
+        rows=rows,
+        query=request.vars.query,
+        )
+
+
+# ##########################################################
+# ## edit delete one record
+# ###########################################################
+
+
+def update():
+    (db, table) = get_table(request)
+    keyed = hasattr(db[table],'_primarykey')
+    record = None
+    if keyed:
+        key = [f for f in request.vars if f in db[table]._primarykey]
+        if key:
+            record = db(db[table][key[0]] == request.vars[key[0]]).select().first()
+    else:
+        record = db(db[table].id == request.args(2)).select().first()
+
+    if not record:
+        qry = query_by_table_type(table, db)
+        session.flash = T('record does not exist')
+        redirect(URL('select', args=request.args[:1],
+                     vars=dict(query=qry)))
+    
+    if keyed:
+        for k in db[table]._primarykey: 
+            db[table][k].writable=False
+    
+    form = SQLFORM(db[table], record, deletable=True, delete_label=T('Check to delete'), 
+                   ignore_rw=ignore_rw and not keyed,
+                   linkto=URL('select',
+                   args=request.args[:1]), upload=URL(r=request,
+                   f='download', args=request.args[:1]))
+
+    if form.accepts(request.vars, session):
+        session.flash = T('done!')
+        qry = query_by_table_type(table, db)
+        redirect(URL('select', args=request.args[:1],
+                 vars=dict(query=qry)))
+    return dict(form=form,table=db[table])
+

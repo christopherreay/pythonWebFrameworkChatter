@@ -28,7 +28,7 @@ def appmaker(zodb_root):
         #otherModel can thus be reached by two different urls. One from the view_config route (assuming OtherModel
         #  is a singleton
         #the other from its location in the object tree, via traversal
-        #  i.e /otherModel
+        #  i.e /otherModel or "/aLeafOrWhatever", no idea which :)
         otherModel = OtherModel()
         otherModel.__parent__ = app_root
         otherModel.__name__   = "aLeafOrWhatever"
